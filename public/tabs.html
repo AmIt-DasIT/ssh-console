@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+  <title>ssh-console</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/style.css" />
+  <script src="/js/boot.js"></script>
+</head>
+<body class="tabshell">
+  <header id="tabbar" class="tabbar">
+    <!-- The + button lives at the end of the strip, right after the last tab (as in Chrome). -->
+    <div id="tabstrip" class="tabstrip" role="tablist" aria-label="Open servers"><button id="tab-new" class="tab-new" type="button" aria-label="New tab"></button></div>
+    <button id="tab-search" class="tab-search" type="button" aria-label="Search tabs"></button>
+  </header>
+  <main id="tabframes" class="tabframes"></main>
+  <script type="module" src="/js/tabs.js"></script>
+</body>
+</html>

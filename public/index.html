@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+  <title>ssh-console</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/vendor/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="/style.css" />
+  <script src="/js/boot.js"></script>
+</head>
+<body>
+
+<!-- ============================== CONNECT SCREEN ============================== -->
+<section id="connect-screen" class="connect-screen">
+  <div class="drag-strip"></div>
+  <div class="connect-layout">
+    <div class="connect-side">
+      <div class="brand">
+        <img class="logo-img" src="/icon.svg" alt="" />
+        <div>
+          <h1>ssh-console</h1>
+          <p class="muted">Control any server you can SSH into: containers, services, processes, files, databases and terminals.</p>
+        </div>
+      </div>
+
+      <div id="saved-wrap" class="saved" hidden>
+        <div class="section-title"><span>Saved connections</span><span id="saved-count" class="pill"></span></div>
+        <div id="saved-list" class="saved-list"></div>
+      </div>
+      <div id="saved-empty" class="saved-empty" hidden>
+        <i data-icon="server"></i>
+        <div><strong>No saved connections yet</strong><span>Servers you connect to appear here for one-click access.</span></div>
+      </div>
+    </div>
+
+    <form id="connect-form" class="connect-card" autocomplete="on">
+      <div class="form-title">
+        <h2 id="form-title">New connection</h2>
+        <button type="button" id="form-new" class="btn ghost small" hidden><i data-icon="plus"></i>New</button>
+      </div>
+
+      <label>Name <span class="muted">(optional)</span>
+        <input name="label" placeholder="Production server" autocomplete="off" />
+      </label>
+
+      <div class="row">
+        <label class="grow">Host
+          <input name="host" required placeholder="192.168.1.10 or server.example.com" autocomplete="off" />
+        </label>
+        <label class="port">Port
+          <input name="port" type="number" min="1" max="65535" value="22" />
+        </label>
+      </div>
+
+      <label>Username
+        <input name="username" required placeholder="root" autocomplete="username" />
+      </label>
+
+      <div class="seg" role="tablist">
+        <button type="button" data-auth="password" class="active"><i data-icon="key"></i>Password</button>
+        <button type="button" data-auth="key"><i data-icon="lock"></i>Private key</button>
+      </div>
+
+      <div data-auth-panel="password">
+        <label>Password
+          <input name="password" type="password" autocomplete="current-password" />
+        </label>
+      </div>
+
+      <div data-auth-panel="key" hidden>
+        <label>Private key
+          <textarea name="privateKey" rows="5" spellcheck="false" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
+        </label>
+        <div class="row">
+          <label class="file-btn btn ghost small"><i data-icon="upload"></i>Load key file…
+            <input type="file" id="key-file" hidden />
+          </label>
+          <label class="grow">Passphrase (if any)
+            <input name="passphrase" type="password" autocomplete="off" />
+          </label>
+        </div>
+      </div>
+
+      <div class="checks">
+        <label class="check" id="remember-wrap"><input type="checkbox" name="remember" /> <span id="remember-label">Remember password</span></label>
+        <label class="check" id="auto-wrap" hidden><input type="checkbox" name="autoConnect" /> Connect automatically when the app opens</label>
+      </div>
+
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <label>Docker command
+          <input name="dockerCmd" value="docker" placeholder="docker" />
+          <small class="muted">Use <code>sudo -n docker</code> if your user isn't in the docker group (needs passwordless sudo).</small>
+        </label>
+        <label class="check"><input type="checkbox" name="legacyAlgorithms" /> Allow legacy algorithms (SHA-1, CBC) for old servers</label>
+      </details>
+
+      <div id="connect-error" class="alert error" hidden></div>
+
+      <button id="connect-btn" class="btn primary wide" type="submit"><i data-icon="plug"></i><span>Connect</span></button>
+      <p id="connect-note" class="muted tiny"></p>
+    </form>
+  </div>
+</section>
+
+<!-- ============================== APP ============================== -->
+<section id="app" class="app" hidden>
+  <header class="topbar">
+    <div class="topbar-left">
+      <button id="sidebar-toggle" class="icon-btn" title="Toggle sidebar" aria-label="Toggle sidebar"><i data-icon="sidebar"></i></button>
+      <div class="conn-pill" title="">
+        <span class="dot st-running"></span>
+        <div class="conn-info">
+          <strong id="conn-title"></strong>
+          <span id="conn-sub"></span>
+        </div>
+      </div>
+    </div>
+    <button id="palette-btn" class="palette-trigger" title="Command palette">
+      <i data-icon="search"></i><span>Search or jump to…</span><kbd id="palette-kbd">⌘K</kbd>
+    </button>
+    <div class="topbar-right">
+      <button id="host-shell-btn" class="icon-btn" title="Host terminal (⌘⇧T)" aria-label="Host terminal"><i data-icon="terminal"></i></button>
+      <button id="new-window-btn" class="icon-btn" title="New window (⌘N)" aria-label="New window" hidden><i data-icon="window"></i></button>
+      <button id="theme-btn" class="icon-btn" title="Theme" aria-label="Theme"><i data-icon="moon"></i></button>
+      <button id="settings-btn" class="icon-btn" title="Settings (⌘,)" aria-label="Settings"><i data-icon="settings"></i></button>
+      <button id="disconnect-btn" class="btn danger-ghost small" title="Disconnect"><i data-icon="power"></i><span class="hide-sm">Disconnect</span></button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-head">
+        <div class="search-box">
+          <i data-icon="search"></i>
+          <input id="filter" type="search" placeholder="Filter containers" autocomplete="off" />
+          <kbd>/</kbd>
+        </div>
+        <div class="seg seg-sm" id="state-filter">
+          <button data-f="all" class="active">All <b id="cnt-all"></b></button>
+          <button data-f="running">Running <b id="cnt-running"></b></button>
+          <button data-f="stopped">Stopped <b id="cnt-stopped"></b></button>
+        </div>
+      </div>
+      <div id="container-list" class="container-list"></div>
+      <div class="sidebar-foot">
+        <span id="refresh-note" class="muted tiny">Auto-refresh every 10s</span>
+        <button id="refresh-btn" class="icon-btn" title="Refresh now" aria-label="Refresh"><i data-icon="refresh"></i></button>
+      </div>
+    </aside>
+    <div id="sidebar-scrim" class="sidebar-scrim"></div>
+
+    <main id="main" class="main">
+      <!-- ================= HOST VIEW ================= -->
+      <div id="view-host" class="view">
+        <div class="view-header">
+          <div class="c-avatar host"><i data-icon="server"></i></div>
+          <div class="c-head-text">
+            <div class="c-title"><h2 id="host-name">Host</h2><span class="badge st-running">connected</span></div>
+            <div class="c-meta" id="host-meta"></div>
+          </div>
+          <button class="icon-btn sm head-toggle" title="Collapse header (more room below)" aria-label="Collapse header" aria-expanded="true"><i data-icon="chevron-up"></i></button>
+        </div>
+        <nav class="tabs" id="host-tabs" role="tablist">
+          <button data-tab="overview" class="active"><i data-icon="layers"></i>Overview</button>
+          <button data-tab="containers"><i data-icon="activity"></i>Live stats</button>
+          <button data-tab="images"><i data-icon="image"></i>Images</button>
+          <button data-tab="volumes"><i data-icon="drive"></i>Volumes</button>
+          <button data-tab="networks"><i data-icon="network"></i>Networks</button>
+          <button data-tab="database"><i data-icon="database"></i>Database</button>
+          <button data-tab="files"><i data-icon="folder"></i>Files</button>
+          <button data-tab="terminal"><i data-icon="terminal"></i>Terminal</button>
+          <button data-tab="services"><i data-icon="settings"></i>Services</button>
+          <button data-tab="processes"><i data-icon="cpu"></i>Processes</button>
+          <button data-tab="ports"><i data-icon="plug"></i>Ports</button>
+          <button data-tab="commands"><i data-icon="zap"></i>Commands</button>
+          <span class="spacer"></span>
+          <button id="host-refresh" class="icon-btn tab-refresh" title="Refresh"><i data-icon="refresh"></i></button>
+        </nav>
+        <div id="docker-warning" class="alert warn inset" hidden></div>
+        <div class="panels" id="host-panels">
+          <div class="panel scroll" data-panel="overview"><div id="host-overview"></div></div>
+          <div class="panel scroll" data-panel="containers" hidden><div id="host-containers"></div></div>
+          <div class="panel scroll" data-panel="images" hidden>
+            <div class="toolbar">
+              <div class="search-box sm"><i data-icon="search"></i><input id="images-filter" type="search" placeholder="Filter images" /></div>
+              <span class="spacer"></span>
+              <button id="images-pull" class="btn small"><i data-icon="download"></i>Pull image</button>
+              <button id="images-prune" class="btn ghost small"><i data-icon="trash"></i>Prune dangling images</button>
+            </div>
+            <div id="images"></div>
+          </div>
+          <div class="panel scroll" data-panel="volumes" hidden><div id="volumes"></div></div>
+          <div class="panel scroll" data-panel="networks" hidden><div id="networks"></div></div>
+          <div class="panel" data-panel="database" hidden><div id="host-db-mount" class="fill"></div></div>
+          <div class="panel" data-panel="files" hidden><div id="host-files-mount" class="fill"></div></div>
+          <div class="panel scroll" data-panel="services" hidden><div id="sys-services"></div></div>
+          <div class="panel scroll" data-panel="processes" hidden><div id="sys-processes"></div></div>
+          <div class="panel scroll" data-panel="ports" hidden><div id="sys-ports"></div></div>
+          <div class="panel scroll" data-panel="commands" hidden><div id="sys-commands"></div></div>
+          <div class="panel" data-panel="terminal" hidden>
+            <div class="toolbar">
+              <button id="host-term-new" class="btn ghost small" title="Open another terminal tab (up to 5)"><i data-icon="plus"></i>New terminal</button>
+              <span class="muted tiny">Interactive SSH shell on the host. <kbd>Ctrl</kbd>+<kbd>F</kbd> searches the terminal.</span>
+              <span class="spacer"></span>
+              <button id="host-term-files" class="btn ghost small toggle" title="Show a file browser beside the terminal"><i data-icon="panelRight"></i>Files</button>
+            </div>
+            <div id="host-term-split" class="term-split">
+              <div id="host-term-mount" class="term-mount"></div>
+              <div id="host-term-side" class="term-side" hidden>
+                <div id="host-term-resize" class="term-resize" title="Drag to resize · double-click to reset"></div>
+                <div id="host-term-files-mount" class="fill"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= CONTAINER VIEW ================= -->
+      <div id="view-container" class="view" hidden>
+        <div class="view-header">
+          <div class="c-avatar" id="c-avatar"><i data-icon="box"></i></div>
+          <div class="c-head-text">
+            <div class="c-title">
+              <h2 id="c-name"></h2>
+              <span id="c-state" class="badge"></span>
+            </div>
+            <div class="c-meta">
+              <span id="c-image"></span>
+              <button id="c-id" class="link-btn mono" title="Copy full container ID"></button>
+              <span id="c-status"></span>
+            </div>
+            <div id="c-ports" class="chips"></div>
+          </div>
+          <div class="c-actions">
+            <button class="btn small" data-action="start" title="Start"><i data-icon="play"></i>Start</button>
+            <button class="btn small" data-action="unpause" title="Resume"><i data-icon="play"></i>Resume</button>
+            <button class="btn small" data-action="restart" title="Restart"><i data-icon="restart"></i>Restart</button>
+            <button class="btn small" data-action="pause" title="Pause"><i data-icon="pause"></i>Pause</button>
+            <button class="btn small warn-ghost" data-action="stop" title="Stop"><i data-icon="stop"></i>Stop</button>
+            <button class="btn small danger-ghost" data-action="remove" title="Remove"><i data-icon="trash"></i>Remove</button>
+          </div>
+          <button class="icon-btn sm head-toggle" title="Collapse header (more room below)" aria-label="Collapse header" aria-expanded="true"><i data-icon="chevron-up"></i></button>
+        </div>
+
+        <nav class="tabs" id="c-tabs" role="tablist">
+          <button data-tab="overview" class="active"><i data-icon="layers"></i>Overview</button>
+          <button data-tab="logs"><i data-icon="logs"></i>Logs</button>
+          <button data-tab="terminal"><i data-icon="terminal"></i>Terminal</button>
+          <button data-tab="database" class="tab-db" hidden><i data-icon="database"></i>Database</button>
+          <button data-tab="files"><i data-icon="folder"></i>Files</button>
+          <button data-tab="stats"><i data-icon="activity"></i>Stats</button>
+          <button data-tab="processes"><i data-icon="cpu"></i>Processes</button>
+          <button data-tab="env"><i data-icon="key"></i>Environment</button>
+          <button data-tab="inspect"><i data-icon="file"></i>Inspect</button>
+        </nav>
+
+        <div class="panels" id="c-panels">
+          <div class="panel scroll" data-panel="overview"><div id="overview"></div></div>
+
+          <div class="panel" data-panel="logs" hidden>
+            <div class="toolbar">
+              <label>Tail
+                <select id="logs-tail">
+                  <option value="100">100</option>
+                  <option value="500" selected>500</option>
+                  <option value="2000">2000</option>
+                  <option value="10000">10000</option>
+                  <option value="all">All</option>
+                </select>
+              </label>
+              <label>Since
+                <select id="logs-since">
+                  <option value="">any time</option>
+                  <option value="5m">5 min</option>
+                  <option value="1h">1 hour</option>
+                  <option value="24h">24 hours</option>
+                  <option value="7d">7 days</option>
+                </select>
+              </label>
+              <label class="check"><input id="logs-ts" type="checkbox" /> Timestamps</label>
+              <label class="check" title="Colour ERROR / WARN / INFO / DEBUG"><input id="logs-levels" type="checkbox" /> Highlight levels</label>
+              <div class="search-box sm"><i data-icon="search"></i><input id="logs-search" type="search" placeholder="Find (↵ / ⇧↵)" /></div>
+              <span class="spacer"></span>
+              <span id="logs-status" class="muted tiny"></span>
+              <button id="logs-reload" class="icon-btn" title="Reload"><i data-icon="refresh"></i></button>
+              <button id="logs-clear" class="icon-btn" title="Clear"><i data-icon="x"></i></button>
+              <button id="logs-download" class="btn ghost small" title="Download the complete log with timestamps"><i data-icon="download"></i>Download</button>
+            </div>
+            <div id="logs-mount" class="term-mount"></div>
+          </div>
+
+          <div class="panel" data-panel="terminal" hidden>
+            <div class="toolbar">
+              <label title="Shell used by new terminals">Shell
+                <select id="shell-select">
+                  <option value="auto">auto (bash → ash → sh)</option>
+                  <option value="bash">bash</option>
+                  <option value="sh">sh</option>
+                  <option value="ash">ash</option>
+                </select>
+              </label>
+              <button id="term-new" class="btn ghost small" title="Open another terminal tab (up to 5)"><i data-icon="plus"></i>New terminal</button>
+              <span class="muted tiny">Runs <code>docker exec -it</code> on the host. <kbd>Ctrl</kbd>+<kbd>F</kbd> searches the terminal.</span>
+            </div>
+            <div id="c-term-mount" class="term-mount"></div>
+            <div id="term-not-running" class="empty-state" hidden>
+              <div><i data-icon="terminal" class="big"></i><p class="muted">The container isn't running. Start it to open a shell.</p></div>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="database" hidden><div id="db-mount" class="fill"></div></div>
+          <div class="panel" data-panel="files" hidden><div id="files-mount" class="fill"></div></div>
+          <div class="panel scroll" data-panel="stats" hidden><div id="stats"></div></div>
+
+          <div class="panel scroll" data-panel="processes" hidden>
+            <div class="toolbar"><button id="top-refresh" class="btn ghost small"><i data-icon="refresh"></i>Refresh</button></div>
+            <div id="processes"></div>
+          </div>
+
+          <div class="panel scroll" data-panel="env" hidden>
+            <div class="toolbar">
+              <div class="search-box sm"><i data-icon="search"></i><input id="env-filter" type="search" placeholder="Filter variables" /></div>
+              <label class="check"><input id="env-reveal" type="checkbox" /> Show values</label>
+            </div>
+            <div id="env"></div>
+          </div>
+
+          <div class="panel scroll" data-panel="inspect" hidden>
+            <div class="toolbar"><button id="inspect-copy" class="btn ghost small"><i data-icon="copy"></i>Copy JSON</button></div>
+            <pre id="inspect-json" class="json"></pre>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</section>
+
+<div id="island" class="island" role="status" aria-live="polite"></div>
+<div id="server-banner" class="server-banner" role="alert" hidden>
+  <i data-icon="alert"></i><span id="server-banner-text"></span>
+  <button id="server-banner-close" class="icon-btn" title="Dismiss" aria-label="Dismiss"><i data-icon="x"></i></button>
+</div>
+
+<script src="/vendor/xterm/lib/xterm.js"></script>
+<script src="/vendor/addon-fit/lib/addon-fit.js"></script>
+<script src="/vendor/addon-search/lib/addon-search.js"></script>
+<script src="/vendor/addon-web-links/lib/addon-web-links.js"></script>
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>
